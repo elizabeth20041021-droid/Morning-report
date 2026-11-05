@@ -9,14 +9,17 @@
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--paper); color: var(--ink); font-family: Palatino, "Palatino Linotype", "Songti SC", "Noto Serif CJK SC", serif; line-height: 1.5; }
     main { width: min(1100px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0 64px; }
-    header.top { border-bottom: 1px solid var(--ink); padding-bottom: 16px; }
+    .topbar { display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; border-bottom: 1px solid var(--ink); padding-bottom: 16px; }
     h1 { margin: 0; font-size: 40px; font-weight: 560; letter-spacing: -0.03em; }
     h2 { margin: 0; font-size: 28px; font-weight: 560; }
     h2 span { color: var(--muted); font-size: 16px; }
     .kicker { margin: 0 0 6px; letter-spacing: 0.14em; text-transform: uppercase; font-family: "Avenir Next", "Segoe UI", sans-serif; font-size: 12px; color: var(--muted); }
-    .lede, .meta, .fine { color: var(--muted); }
+    .lede, .meta, .fine, #status { color: var(--muted); }
     .lede { max-width: 42rem; }
     a { color: inherit; }
+    button { background: #1c1915; color: #f6f1e7; border: 0; border-radius: 8px; padding: 12px 18px; font: inherit; cursor: pointer; }
+    button:disabled { opacity: 0.55; }
+    #status { margin: 8px 0 0; min-height: 1.4em; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
     .chips span { background: #efe8db; border-radius: 999px; padding: 3px 10px; font-family: "Avenir Next", "Segoe UI", sans-serif; font-size: 12px; }
     .card { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); }
@@ -43,15 +46,22 @@
 </head>
 <body>
   <main>
-    <header class="top">
-      <p class="kicker">公开标题 · 香港时间</p>
-      <h1>持仓早报</h1>
-      <p class="lede">2026-11-05 11:13 · 窗口 72 小时。三栏和综合都是 -10 到 +10。分数来自标题归类，不是目标价，也不是买卖指令。</p>
+    <header class="topbar">
+      <div>
+        <p class="kicker">公开标题 · 香港时间</p>
+        <h1>持仓早报</h1>
+      </div>
+      <div>
+        <button id="refresh" type="button">立即更新</button>
+        <p id="status"></p>
+      </div>
     </header>
+    <div id="sheet">
+      <p class="lede" id="when">2026-11-05 11:13 · 窗口 72 小时。三栏和综合都是 -10 到 +10。分数来自标题归类，不是目标价，也不是买卖指令。</p>
     <section>
       <p>窗口里较多的是加息或鹰派、关税、中期选举、美伊冲突、美联储路径、光互连订单。每只股票按政治、金融、同业分开打分，综合分是三栏的加权结果，范围 -10 到 +10。</p>
       <div class="chips"><span>加息或鹰派</span><span>关税</span><span>中期选举</span><span>美伊冲突</span><span>美联储路径</span><span>光互连订单</span></div>
-      <p class="fine">33 个来源读到了。这一页是静态文件，打开它不需要原来的服务器。</p>
+      <p class="fine">31 个来源读到了。按「立即更新」会在这台手机上重新取标题。</p>
     </section>
     <article class="card">
     <div class="board">
@@ -187,13 +197,3 @@
     </header>
     <p>偏多 5。报价 黄金期货 +1.6%，紫金矿业 +4.2%，中国黄金国际 +4.1%。标题里还有港股招金矿业。同类涨跌只作参照。</p>
     <ul class="marks"><li><span>黄金期货 <em>GCmain</em></span><span class="up">4137.0 USD +1.6%</span></li><li><span>紫金矿业 <em>2899.HK</em></span><span class="up">30.60 HKD +4.2%</span></li><li><span>中国黄金国际 <em>2099.HK</em></span><span class="up">186.4 HKD +4.1%</span></li></ul>
-    <ul class="heads"><li><p><a href="https://www.gelonghui.com/p/7292227">400盎司金条电子存证上线，招金矿业(01818.HK)海外抢占新位置</a></p><p class="meta">黄金 · 11月04日 17:33</p></li></ul>
-  </section>
-    </div>
-  </article>
-    <footer>
-      <p>政治栏看美联储、选举、美伊和特朗普。金融栏看利率、金价、资金和公司自身。同业栏看美股、港股和 A 股同类。黄金同业还包括黄金期货、紫金矿业和中国黄金国际的当日涨跌。</p>
-    </footer>
-  </main>
-</body>
-</html>
