@@ -17,7 +17,7 @@
     .lede, .meta, .fine, #status { color: var(--muted); }
     .lede { max-width: 42rem; }
     a { color: inherit; }
-    button { background: #1c1915; color: #f6f1e7; border: 0; border-radius: 8px; padding: 12px 18px; font: inherit; cursor: pointer; }
+    button { background: #1c1915; color: #f6f1e7; border: 0; border-radius: 8px; padding: 12px 18px; font: inherit; cursor: pointer; position: relative; z-index: 2; touch-action: manipulation; }
     button:disabled { opacity: 0.55; }
     #status { margin: 8px 0 0; min-height: 1.4em; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
@@ -43,6 +43,874 @@
       .overall-num { font-size: 40px; }
     }
   </style>
+  <script>
+const WATCH = [
+  { name: "罗博特科", ticker: "300757", market: "A股", books: ["cpo-equipment"] },
+  { name: "天孚通信", ticker: "300394", market: "A股", books: ["cpo-equipment", "cpo-module"] },
+  { name: "炬光科技", ticker: "688167", market: "A股", books: ["cpo-equipment"] },
+  { name: "中际旭创", ticker: "300308", market: "A股", books: ["cpo-module"] },
+  { name: "新易盛", ticker: "300502", market: "A股", books: ["cpo-module"] },
+  { name: "Lumentum", ticker: "LITE", market: "美股", books: ["cpo-equipment", "cpo-module"] },
+  { name: "Coherent", ticker: "COHR", market: "美股", books: ["cpo-equipment", "cpo-module"] },
+  { name: "Fabrinet", ticker: "", market: "美股", books: ["cpo-equipment"] },
+  { name: "博通", aliases: ["Broadcom"], ticker: "AVGO", market: "美股", books: ["cpo-equipment", "cpo-module"] },
+  { name: "紫金矿业", ticker: "2899", market: "港股", books: ["gold"] },
+  { name: "中国黄金国际", aliases: ["China Gold International"], ticker: "2099", market: "港股", books: ["gold"] },
+  { name: "山东黄金", ticker: "1787", market: "港股", books: ["gold"] },
+  { name: "招金矿业", ticker: "1818", market: "港股", books: ["gold"] },
+  { name: "Newmont", ticker: "NEM", market: "美股", books: ["gold"] },
+  { name: "黄金期货", aliases: ["GCmain", "COMEX黄金"], ticker: "", market: "期货", books: ["gold"] },
+];
+
+const QUOTE_BOARD = {
+  gold: [
+    { name: "黄金期货", label: "GCmain", symbol: "GC=F", market: "期货", weight: 1 },
+    { name: "紫金矿业", label: "2899.HK", symbol: "2899.HK", market: "港股", weight: 0.7 },
+    { name: "中国黄金国际", label: "2099.HK", symbol: "2099.HK", market: "港股", weight: 0.7 },
+  ],
+};
+
+const POLITICAL_QUERIES = [
+  {
+    name: "Google News · 美联储",
+    q: '("美联储" OR Fed OR 沃什 OR Warsh) (加息 OR 降息 OR 利率 OR hike OR cut) when:3d',
+  },
+  {
+    name: "Google News · 中期选举",
+    q: '("中期选举" OR midterm) (众议院 OR 参议院 OR Senate OR House OR 民主党 OR 共和党) when:3d',
+  },
+  {
+    name: "Google News · 美伊",
+    q: '(伊朗 OR 美伊 OR 霍尔木兹 OR Hormuz) (战争 OR 袭击 OR 停火 OR 油价 OR 原油) when:3d',
+  },
+  {
+    name: "Google News · 特朗普",
+    q: '(特朗普 OR Trump) (关税 OR 美联储 OR 伊朗 OR 中国 OR Fed) when:2d',
+  },
+];
+
+const CHAIN_QUERY =
+  '(Lumentum OR Coherent OR Fabrinet OR Broadcom OR 博通 OR 天孚通信 OR 中际旭创 OR 新易盛 OR 罗博特科 OR 炬光科技 OR 紫金矿业 OR 中国黄金国际 OR Newmont OR "黄金期货" OR COMEX) (CPO OR 光模块 OR 硅光 OR 激光 OR 黄金 OR gold) when:3d';
+
+const GELONG_POLITICS = ["美联储", "特朗普", "伊朗", "中期选举"];
+const GELONG_CHAIN = ["天孚通信", "中际旭创", "新易盛", "博通", "紫金矿业", "中国黄金国际"];
+
+
+
+const BOOKS = {
+  "cpo-equipment": "CPO 设备",
+  "cpo-module": "CPO 模块与芯片",
+  gold: "黄金",
+  general: "其他",
+};
+
+const DRIVERS = [
+  {
+    id: "hike",
+    label: "加息或鹰派",
+    re: /加息|鹰派|rate hike|hawkish|缩表|利率上|收益率升|美债.*升/i,
+    books: { gold: -1.7, "cpo-equipment": -0.6, "cpo-module": -0.7, general: -0.25 },
+  },
+  {
+    id: "cut",
+    label: "降息或鸽派",
+    re: /降息|鸽派|rate cut|dovish|暂停加息|停止加息/i,
+    books: { gold: 1.6, "cpo-equipment": 0.45, "cpo-module": 0.5, general: 0.2 },
+  },
+  {
+    id: "sticky",
+    label: "通胀粘住",
+    re: /通胀(?:抬头|反弹|粘)|CPI(?:上升|超预期)|核心PCE|物价上涨|再通胀/i,
+    books: { gold: -0.8, "cpo-equipment": -0.35, "cpo-module": -0.35, general: -0.15 },
+  },
+  {
+    id: "stagflation",
+    label: "滞胀",
+    re: /滞胀|stagflation/i,
+    books: { gold: 0.4, "cpo-equipment": -1.1, "cpo-module": -1.1, general: -0.8 },
+  },
+  {
+    id: "deflation",
+    label: "需求转弱",
+    re: /通缩|衰退|recession|硬着陆|失业(?:率)?(?:上升|走高)|裁员/i,
+    books: { gold: -0.4, "cpo-equipment": -1.3, "cpo-module": -1.3, general: -0.7 },
+  },
+  {
+    id: "gold-up",
+    label: "金价买盘",
+    re: /黄金(?:上涨|走高|新高|反弹)|金价(?:上涨|走高|新高)|央行购金|黄金ETF流入|避险买盘/i,
+    books: { gold: 1.8, "cpo-equipment": 0, "cpo-module": 0, general: 0 },
+  },
+  {
+    id: "gold-down",
+    label: "金价抛售",
+    re: /黄金(?:下跌|走低|跳水|抛售)|金价(?:下跌|走低|跳水)|黄金ETF流出|期货抛售|现货黄金.*跌/i,
+    books: { gold: -1.8, "cpo-equipment": 0, "cpo-module": 0, general: 0 },
+  },
+  {
+    id: "cpo-up",
+    label: "光互连订单",
+    re: /光模块|1\.6T|800G|CPO|共封装|硅光|资本开支(?:上调|扩张)|订单(?:覆盖|增长)|英伟达|光芯片/i,
+    books: { gold: 0, "cpo-equipment": 1.5, "cpo-module": 1.6, general: 0.1 },
+  },
+  {
+    id: "cpo-down",
+    label: "光互连受压",
+    re: /出口管制|FCC|零件(?:短缺|紧张)|激光器短缺|下调(?:目标价|评级|盈利)|光模块.{0,8}(?:下跌|回调|大跌)|AI(?:硬件|硬科技).{0,8}(?:跌|回调|下挫)|CPO.{0,12}跌|概念股.{0,8}跌|减持/i,
+    books: { gold: 0, "cpo-equipment": -1.3, "cpo-module": -1.6, general: 0 },
+  },
+  {
+    id: "tariff",
+    label: "关税",
+    re: /关税|tariff/i,
+    books: { gold: 0.25, "cpo-equipment": -0.55, "cpo-module": -0.85, general: -0.2 },
+  },
+  {
+    id: "hk-down",
+    label: "港股资金流出",
+    re: /南向(?:资金)?净卖|恒指(?:跌|下跌|失守)|港股(?:下跌|下挫)|解禁/i,
+    books: { gold: -0.35, "cpo-equipment": -0.45, "cpo-module": -0.45, general: -0.4 },
+  },
+  {
+    id: "hk-up",
+    label: "港股回流",
+    re: /南向(?:资金)?净买|国家队入市|恒指(?:涨|上涨|反弹|连阳)/i,
+    books: { gold: 0.15, "cpo-equipment": 0.35, "cpo-module": 0.35, general: 0.3 },
+  },
+  {
+    id: "election",
+    label: "中期选举",
+    political: true,
+    re: /中期选举|众议院|参议院|midterms?|Democrats|Republicans|Congress|民主党.{0,8}(过半|拿下|胜)|共和党.{0,8}(保住|继续控制|胜)/i,
+    books: { gold: 0.35, "cpo-equipment": -0.35, "cpo-module": -0.55, general: -0.2 },
+  },
+  {
+    id: "trump",
+    label: "特朗普发言",
+    political: true,
+    re: /特朗普|Trump/i,
+    books: { gold: 0.3, "cpo-equipment": -0.35, "cpo-module": -0.6, general: -0.2 },
+  },
+  {
+    id: "iran",
+    label: "美伊冲突",
+    political: true,
+    re: /伊朗|美伊|霍尔木兹|Hormuz|Iran/i,
+    books: { gold: 0.85, "cpo-equipment": -0.55, "cpo-module": -0.55, general: -0.4 },
+  },
+  {
+    id: "fed-path",
+    label: "美联储路径",
+    political: true,
+    re: /美联储|聯儲局|联储局|FOMC|沃什|Warsh|联邦基金|\bFed\b/i,
+    books: { gold: -0.15, "cpo-equipment": -0.1, "cpo-module": -0.1, general: -0.05 },
+  },
+];
+
+function strip(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const GENERIC_ALIASES = new Set(["硅光", "光模块", "光芯片", "黄金", "设备", "cpo", "激光"]);
+
+function mentions(holding, text) {
+  const hay = text.toLowerCase();
+  const names = [holding.name, ...(holding.aliases || [])]
+    .map((s) => String(s).trim())
+    .filter((s) => s.length >= 2 && !GENERIC_ALIASES.has(s.toLowerCase()));
+  if (names.some((name) => hay.includes(name.toLowerCase()))) return true;
+  const code = String(holding.ticker || "").toUpperCase().replace(/\.HK$/i, "").replace(/^0+/, "");
+  if (code.length >= 3) {
+    const padded = code.padStart(4, "0");
+    const re = new RegExp(`(?:^|[^0-9])0*${code}(?:\\.HK)?(?![0-9])`, "i");
+    if (re.test(text) || hay.includes(padded.toLowerCase() + ".hk")) return true;
+  }
+  return false;
+}
+
+function driversIn(text) {
+  const masked = String(text).replace(/(澳洲联储|欧洲央行|英国央行|日本央行|加拿大央行|英伦银行).{0,16}/g, "");
+  return DRIVERS.filter((d) => d.re.test(masked));
+}
+
+function wordHit(name, text) {
+  if (!name) return false;
+  if (/[A-Za-z]/.test(name)) {
+    return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text);
+  }
+  return text.includes(name);
+}
+
+function peerOf(book, text) {
+  for (const peer of WATCH) {
+    if (!peer.books.includes(book)) continue;
+    const names = [peer.name, ...(peer.aliases || [])];
+    if (names.some((name) => wordHit(name, text))) return peer;
+    if (peer.ticker && peer.ticker.length >= 3 && new RegExp(`(?:^|[^A-Z0-9])${peer.ticker}(?:[^A-Z0-9]|$)`, "i").test(text)) {
+      return peer;
+    }
+  }
+  return null;
+}
+
+function shock(text) {
+  if (/大跌|暴跌|跳水|下调目标价|下调评级|净卖出|抛售|亏损/.test(text)) return -1.3;
+  if (/大涨|上调目标价|上调评级|净买入|获纳入|中标|扩产|订单/.test(text)) return 1.2;
+  return 0;
+}
+
+const POLITICAL_IDS = new Set(["election", "trump", "iran", "fed-path", "tariff"]);
+const LANE_NAME = { politics: "政治", finance: "金融", peers: "同业" };
+
+function sectorBias(title) {
+  const product = /CPO|NPO|光模[块組]|硅光|矽光|光芯片|1\.6T|800G|共封装|共封裝|光互连|光互連/;
+  const up = /订单|訂單|扩产|擴產|出货|出貨|放量|中标|中標|胜利|勝利|量产|量產|上调|上調/;
+  const down = /跌|回调|回調|下挫|短缺|管制|减持|減持|下调|下調/;
+  if (down.test(title) && (product.test(title) || /光模/.test(title))) return -1;
+  if (up.test(title) && product.test(title)) return 1;
+  return 0;
+}
+
+function toDisplay(raw) {
+  const capped = Math.max(-6, Math.min(6, raw));
+  return Math.round((capped / 6) * 100) / 10;
+}
+
+function stanceOf(score, count) {
+  if (!count) return "信息不足";
+  if (score >= 6) return "明显偏多";
+  if (score >= 3) return "偏多";
+  if (score >= 1.2) return "略偏多";
+  if (score <= -6) return "明显偏空";
+  if (score <= -3) return "偏空";
+  if (score <= -1.2) return "略偏空";
+  return "中性";
+}
+
+function labelsOf(hits) {
+  return [...new Set(hits.flatMap((hit) => hit.drivers))].slice(0, 4);
+}
+
+function quoteMoveScore(change, weight) {
+  if (change == null || !Number.isFinite(change)) return 0;
+  return Math.max(-2.2, Math.min(2.2, change * 150 * (weight || 1)));
+}
+
+function peerMarks(board) {
+  return (board || []).map((peer) => {
+    const change = peer.quote?.change ?? null;
+    return {
+      name: peer.name,
+      label: peer.label,
+      market: peer.market,
+      symbol: peer.symbol,
+      price: peer.quote?.price ?? null,
+      currency: peer.quote?.currency || "",
+      change,
+      score: Math.round(quoteMoveScore(change, peer.weight) * 100) / 100,
+    };
+  });
+}
+
+function laneSentence(kind, hits, score, stance, marks = []) {
+  if (!hits.length && !marks.length) {
+    if (kind === "politics") return "这个窗口没有对得上的政治标题。";
+    if (kind === "peers") return "没有同类报价，也没有同类公司的标题。";
+    return "没有利率、金价、资金或公司自身的标题。";
+  }
+  const labels = labelsOf(hits);
+  const lead = hits.find((hit) => hit.score && Math.sign(hit.score) === Math.sign(score)) || hits.find((hit) => hit.score) || hits[0];
+  if (kind === "politics") {
+    return `${stance} ${score}。来自${labels.join("、") || "政治标题"}。代表标题是「${lead.title}」。`;
+  }
+  if (kind === "peers") {
+    const tape = marks
+      .filter((mark) => mark.change != null)
+      .map((mark) => `${mark.name} ${mark.change >= 0 ? "+" : ""}${(mark.change * 100).toFixed(1)}%`)
+      .join("，");
+    const names = [...new Set(hits.map((hit) => hit.peer).filter(Boolean))].slice(0, 3);
+    const quoted = !marks.length ? "" : tape ? `报价 ${tape}。` : "报价暂时没取到。";
+    const titled = names.length ? `标题里还有${names.join("、")}。` : "";
+    return `${stance} ${score}。${quoted}${titled}同类涨跌只作参照。`;
+  }
+  const named = hits.filter((hit) => hit.direct);
+  if (named.length && hits.every((hit) => !hit.score)) {
+    return `中性 ${score}。点名 ${named.length} 次，标题没有多空方向。`;
+  }
+  return `${stance} ${score}。因素是${labels.join("、") || "公司或市场标题"}。`;
+}
+
+function overallSentence(name, overall, stance, lanes) {
+  const bits = ["politics", "finance", "peers"].map((key) => {
+    const lane = lanes[key];
+    return `${LANE_NAME[key]} ${lane.count ? lane.score : "无"}`;
+  });
+  const ranked = ["politics", "finance", "peers"]
+    .filter((key) => lanes[key].count)
+    .sort((a, b) => Math.abs(lanes[b].score) - Math.abs(lanes[a].score));
+  const lead = ranked.length ? `${LANE_NAME[ranked[0]]}这一栏拉得最开。` : "三栏都没有标题。";
+  return `${name}综合 ${overall}，${stance}。${bits.join("，")}。${lead}`;
+}
+
+function laneWeights(model, book) {
+  const stored = model?.lanes?.[book] || { politics: 0.34, finance: 0.38, peers: 0.28 };
+  const keys = ["politics", "finance", "peers"];
+  const sum = keys.reduce((acc, key) => acc + (stored[key] || 0), 0) || 1;
+  return Object.fromEntries(keys.map((key) => [key, (stored[key] || 0) / sum]));
+}
+
+function laneOf(row) {
+  if (row.peer && !row.direct) return "peers";
+  if (row.driverIds.some((id) => POLITICAL_IDS.has(id))) return "politics";
+  return "finance";
+}
+
+function driverLabels() {
+  return { ...Object.fromEntries(DRIVERS.map((driver) => [driver.id, driver.label])), "peer-tape": "同业报价" };
+}
+
+function buildBriefing({ holdings, headlines, generatedAt, trigger, sources, windowHours, model, peerQuotes }) {
+  const impacts = holdings.map((holding) => {
+    const book = holding.book || "general";
+    const scored = [];
+    for (const item of headlines) {
+      const title = item.title || "";
+      const direct = mentions(holding, title);
+      const peer = direct ? null : peerOf(book, title);
+      let found = driversIn(title).filter((d) => d.books[book]);
+      if (/跌|回调|回調|下挫/.test(title)) found = found.filter((d) => !["cpo-up", "gold-up", "hk-up"].includes(d.id));
+      const bias = sectorBias(title);
+      if (bias !== 1) found = found.filter((d) => d.id !== "cpo-up");
+      if (bias === -1 && !found.some((d) => d.id === "cpo-down") && book.startsWith("cpo")) {
+        found = found.concat(DRIVERS.filter((d) => d.id === "cpo-down"));
+      }
+      const parts = {};
+      for (const driver of found) {
+        const mult = model?.multipliers?.[book]?.[driver.id] ?? 1;
+        parts[driver.id] = (parts[driver.id] || 0) + (driver.books[book] || 0) * mult;
+      }
+      let score = Object.values(parts).reduce((sum, n) => sum + n, 0);
+      const move = shock(title);
+      if (direct) score += move;
+      else if (peer) score += move * 0.7;
+      score = Math.max(-3, Math.min(3, score));
+      const political = found.some((d) => POLITICAL_IDS.has(d.id));
+      const relevant = direct || peer || political || Math.abs(score) >= 0.9;
+      if (!relevant) continue;
+      if (!direct && !peer && !political && found.length === 0) continue;
+      scored.push({
+        title: item.title,
+        source: item.source,
+        via: item.via,
+        link: item.link,
+        publishedAt: item.publishedAt,
+        score: Math.round(score * 100) / 100,
+        direct,
+        peer: peer ? `${peer.market}${peer.name}` : "",
+        political,
+        driverIds: found.map((d) => d.id),
+        drivers: found.map((d) => d.label),
+        parts,
+      });
+    }
+    scored.sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+    const unique = [];
+    for (const row of scored) {
+      const key = `${laneOf(row)}|${row.peer}|${row.driverIds.join("|")}|${Math.sign(row.score)}`;
+      const duplicate = unique.some((prev) => !prev.echo && `${laneOf(prev)}|${prev.peer}|${prev.driverIds.join("|")}|${Math.sign(prev.score)}` === key && (row.political || row.peer));
+      const desk = /Financial Times|Yahoo|路透|Reuters|CNBC|南华早报/i.test(`${row.source || ""} ${row.via || ""}`);
+      if (duplicate && desk && !unique.some((prev) => prev.echo && prev.source === row.source && laneOf(prev) === laneOf(row))) {
+        unique.push({ ...row, score: 0, parts: {}, echo: true });
+      }
+      if (!duplicate) unique.push(row);
+    }
+    const lanes = {};
+    const driverContrib = {};
+    for (const kind of ["politics", "finance", "peers"]) {
+      const ranked = unique
+        .filter((row) => laneOf(row) === kind && !row.echo)
+        .sort((a, b) => Math.abs(b.score) - Math.abs(a.score) || String(b.publishedAt).localeCompare(String(a.publishedAt)));
+      const deskRank = (row) => {
+        const name = `${row.source || ""} ${row.via || ""}`;
+        if (/Financial Times/.test(name)) return 0;
+        if (/路透|Reuters/.test(name)) return 1;
+        if (/Yahoo/.test(name)) return 2;
+        if (/CNBC|南华早报/.test(name)) return 3;
+        return 9;
+      };
+      const top = ranked.slice(0, 3);
+      const extra = unique
+        .filter((row) => laneOf(row) === kind && !top.includes(row) && deskRank(row) < 9)
+        .sort((a, b) => deskRank(a) - deskRank(b) || Math.abs(b.score) - Math.abs(a.score));
+      const rows = [...top, ...extra.slice(0, 2)];
+      const marks = kind === "peers" ? peerMarks(peerQuotes?.[book]) : [];
+      const markRaw = Math.max(-3, Math.min(3, marks.reduce((sum, mark) => sum + mark.score, 0)));
+      const raw = rows.reduce((sum, row) => sum + row.score, 0) + markRaw;
+      const priced = marks.filter((mark) => mark.price != null).length;
+      const score = toDisplay(raw);
+      const stance = stanceOf(score, rows.length + priced);
+      for (const row of rows) {
+        for (const [id, value] of Object.entries(row.parts)) driverContrib[id] = (driverContrib[id] || 0) + value;
+      }
+      if (markRaw) driverContrib["peer-tape"] = (driverContrib["peer-tape"] || 0) + markRaw;
+      lanes[kind] = {
+        score,
+        stance,
+        count: rows.length + priced,
+        summary: laneSentence(kind, rows, score, stance, marks),
+        headlines: rows.map(({ parts, driverIds, ...rest }) => rest),
+        marks,
+      };
+    }
+    const weights = laneWeights(model, book);
+    let used = 0;
+    let acc = 0;
+    for (const kind of ["politics", "finance", "peers"]) {
+      if (!lanes[kind].count) continue;
+      acc += lanes[kind].score * weights[kind];
+      used += weights[kind];
+    }
+    const score = used ? Math.round((acc / used) * 10) / 10 : 0;
+    const stance = stanceOf(score, Object.values(lanes).some((lane) => lane.count) ? 2 : 0);
+    return {
+      id: holding.id,
+      ticker: holding.ticker,
+      name: holding.name,
+      book,
+      bookLabel: BOOKS[book] || book,
+      shares: holding.shares || "",
+      cost: holding.cost || "",
+      quote: holding.quote || null,
+      score,
+      stance,
+      weights: {
+        politics: Math.round(weights.politics * 100),
+        finance: Math.round(weights.finance * 100),
+        peers: Math.round(weights.peers * 100),
+      },
+      summary: overallSentence(holding.name, score, stance, lanes),
+      lanes,
+      driverContrib,
+    };
+  });
+
+  const macroHits = headlines
+    .map((item) => {
+      const found = driversIn(`${item.title} ${item.summary || ""}`);
+      return { ...item, drivers: found.map((d) => d.label), weight: found.length };
+    })
+    .filter((item) => item.weight > 0)
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 8);
+
+  const labels = [...new Set(macroHits.flatMap((h) => h.drivers))].slice(0, 6);
+  const macroSummary = labels.length
+    ? `窗口里较多的是${labels.join("、")}。每只股票按政治、金融、同业分开打分，综合分是三栏的加权结果，范围 -10 到 +10。`
+    : "窗口里没有形成清楚的宏观标题。三栏会显示信息不足。";
+
+  return {
+    generatedAt,
+    trigger,
+    windowHours,
+    sources,
+    macro: {
+      summary: macroSummary,
+      drivers: labels,
+      headlines: macroHits.map((h) => ({
+        title: h.title,
+        source: h.source,
+        via: h.via,
+        link: h.link,
+        publishedAt: h.publishedAt,
+        drivers: h.drivers,
+      })),
+    },
+    impacts,
+  };
+}
+
+
+function esc(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function scoreText(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  const rounded = Math.round(n * 10) / 10;
+  return `${rounded > 0 ? "+" : ""}${rounded.toFixed(1)}`;
+}
+
+function tone(stance) {
+  const text = String(stance || "");
+  if (text.includes("多")) return "up";
+  if (text.includes("空")) return "down";
+  return "flat";
+}
+
+function when(value) {
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(time);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("month")}月${get("day")}日 ${get("hour")}:${get("minute")}`;
+}
+
+function pct(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  return `${n > 0 ? "+" : ""}${(n * 100).toFixed(1)}%`;
+}
+
+function money(mark) {
+  const price = Number(mark.price);
+  if (!Number.isFinite(price)) return "";
+  const digits = price >= 100 ? 1 : 2;
+  return `${price.toFixed(digits)} ${mark.currency || ""}`.trim();
+}
+
+function headlines(rows) {
+  if (!rows?.length) return `<p class="empty">这一栏没有对得上的标题。</p>`;
+  return `<ul class="heads">${rows.map((row) => {
+    const title = esc(row.title);
+    const body = row.link ? `<a href="${esc(row.link)}">${title}</a>` : title;
+    const meta = [row.source, when(row.publishedAt)].filter(Boolean).map(esc).join(" · ");
+    return `<li><p>${body}</p><p class="meta">${meta}</p></li>`;
+  }).join("")}</ul>`;
+}
+
+function marks(rows) {
+  if (!rows?.length) return "";
+  return `<ul class="marks">${rows.map((mark) => {
+    const move = pct(mark.change);
+    const cls = mark.change > 0 ? "up" : mark.change < 0 ? "down" : "flat";
+    return `<li><span>${esc(mark.name)} <em>${esc(mark.label || "")}</em></span><span class="${cls}">${esc(money(mark))} ${esc(move)}</span></li>`;
+  }).join("")}</ul>`;
+}
+
+function lane(label, data) {
+  const stance = data?.stance || "信息不足";
+  return `<section class="lane">
+    <header>
+      <p class="kicker">${esc(label)}</p>
+      <p class="lane-score ${tone(stance)}">${data?.count ? scoreText(data.score) : "—"}</p>
+      <p class="${tone(stance)}">${esc(stance)}</p>
+    </header>
+    <p>${esc(data?.summary || "")}</p>
+    ${marks(data?.marks)}
+    ${headlines(data?.headlines)}
+  </section>`;
+}
+
+function card(impact) {
+  const quote = impact.quote || {};
+  const move = pct(quote.change);
+  const bits = [
+    impact.bookLabel,
+    quote.price != null ? `${money(quote)} ${move}` : "",
+    impact.weights ? `权重 政治 ${impact.weights.politics}% · 金融 ${impact.weights.finance}% · 同业 ${impact.weights.peers}%` : "",
+  ].filter(Boolean).map(esc).join(" · ");
+  return `<article class="card">
+    <div class="board">
+      <div class="overall">
+        <p class="kicker">综合</p>
+        <p class="overall-num ${tone(impact.stance)}">${scoreText(impact.score)}</p>
+        <p class="${tone(impact.stance)}">${esc(impact.stance || "信息不足")}</p>
+      </div>
+      <div>
+        <h2>${esc(impact.name || impact.ticker)} <span>${esc(impact.ticker || "")}</span></h2>
+        <p class="meta">${bits}</p>
+        <p class="conclusion">${esc(impact.summary || "")}</p>
+      </div>
+    </div>
+    <div class="lanes">
+      ${lane("政治", impact.lanes?.politics)}
+      ${lane("金融新闻", impact.lanes?.finance)}
+      ${lane("同业表现", impact.lanes?.peers)}
+    </div>
+  </article>`;
+}
+
+function sheetHtml(brief) {
+  const failed = (brief.sources || []).filter((source) => !source.ok).map((source) => source.name);
+  const ok = (brief.sources || []).filter((source) => source.ok && source.count).length;
+  const chips = (brief.macro?.drivers || []).map((driver) => `<span>${esc(driver)}</span>`).join("");
+  return `<p class="lede" id="when">${esc(brief.hkDate || "")} ${esc(brief.hkTime || "")} · 窗口 ${esc(brief.windowHours)} 小时。三栏和综合都是 -10 到 +10。分数来自标题归类，不是目标价，也不是买卖指令。</p>
+    <section>
+      <p>${esc(brief.macro?.summary || "")}</p>
+      <div class="chips">${chips}</div>
+      <p class="fine">${ok} 个来源读到了。${failed.length ? `没读到：${esc(failed.join("、"))}。` : ""}按「立即更新」会在这台手机上重新取标题。</p>
+    </section>
+    ${(brief.impacts || []).map(card).join("\n")}
+    <footer>
+      <p>政治栏看美联储、选举、美伊和特朗普。金融栏看利率、金价、资金和公司自身。同业栏看美股、港股和 A 股同类。黄金同业还包括紫金矿业和中国黄金国际的当日涨跌。</p>
+    </footer>`;
+}
+
+
+
+
+
+if (typeof AbortSignal !== "undefined" && !AbortSignal.timeout) {
+  AbortSignal.timeout = (ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  };
+}
+
+const HOLDINGS = [
+  { id: "3757", ticker: "3757.HK", name: "罗博特科", book: "cpo-equipment", aliases: ["RoboTechnik", "300757"] },
+  { id: "9856", ticker: "9856.HK", name: "纳真科技", book: "cpo-module", aliases: ["Ligent", "纳真"] },
+  { id: "2259", ticker: "2259.HK", name: "紫金黄金国际", book: "gold", aliases: ["紫金黄金", "Zijin Gold"] },
+];
+
+const STORE = "brief-live-v1";
+
+function stripText(value) {
+  return String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function hkStamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return { hkDate: `${get("year")}-${get("month")}-${get("day")}`, hkTime: `${get("hour")}:${get("minute")}` };
+}
+
+function gelongCode(symbol) {
+  const match = String(symbol || "").match(/^(\d+)\.HK$/i);
+  if (!match) return "";
+  return `hk${match[1].padStart(5, "0")}`;
+}
+
+async function gelongJson(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+  if (!res.ok) throw new Error(`格隆汇 HTTP ${res.status}`);
+  return res.json();
+}
+
+async function gelongSearch(keyword) {
+  const url = new URL("https://www.gelonghui.com/api/post/search/v4");
+  url.searchParams.set("keyword", keyword);
+  url.searchParams.set("isVipArticle", "false");
+  url.searchParams.set("count", "8");
+  url.searchParams.set("page", "1");
+  url.searchParams.set("searchArea", "all");
+  const data = await gelongJson(url);
+  return (data.result || []).map((item) => ({
+    title: stripText(item.title),
+    link: item.link || "",
+    publishedAt: item.timestamp ? new Date(item.timestamp * 1000).toISOString() : "",
+    summary: stripText(item.summary).slice(0, 500),
+    source: item.source || item.nick || "格隆汇",
+    via: "格隆汇搜索",
+  })).filter((item) => item.title && `${item.title}${item.summary}`.includes(keyword));
+}
+
+async function gelongChannel(tag, via) {
+  const data = await gelongJson(`https://www.gelonghui.com/api/channels/${tag}/articles/v8`);
+  return (data.result || []).slice(0, 12).map((row) => {
+    const item = row.data || row;
+    return {
+      title: stripText(item.title),
+      link: item.link || "",
+      publishedAt: item.timestamp ? new Date(item.timestamp * 1000).toISOString() : "",
+      summary: stripText(item.summary).slice(0, 400),
+      source: item.source || item.nick || "格隆汇",
+      via,
+    };
+  }).filter((item) => item.title);
+}
+
+async function gelongLive() {
+  const data = await gelongJson("https://www.gelonghui.com/api/live-channels/all/lives/v4?limit=30");
+  return (data.result || []).map((item) => ({
+    title: stripText(item.title || item.content || "").slice(0, 180),
+    link: item.route || `https://www.gelonghui.com/live/${item.id}`,
+    publishedAt: item.createTimestamp ? new Date(item.createTimestamp * 1000).toISOString() : "",
+    summary: stripText(item.content).slice(0, 400),
+    source: "格隆汇快讯",
+    via: "格隆汇7x24",
+  })).filter((item) => item.title);
+}
+
+async function googleRss(query, label, lang = "zh-HK") {
+  const feed = new URL("https://news.google.com/rss/search");
+  feed.searchParams.set("q", query);
+  feed.searchParams.set("hl", lang);
+  feed.searchParams.set("gl", lang.startsWith("en") ? "US" : "HK");
+  feed.searchParams.set("ceid", lang.startsWith("en") ? "US:en" : "HK:zh-Hant");
+  const res = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.toString())}`, { signal: AbortSignal.timeout(12000) });
+  if (res.status === 429) throw new Error("Google 新闻这一小时的次数用完了");
+  const data = await res.json();
+  if (data.status !== "ok") throw new Error(data.message || "Google 新闻没返回");
+  return (data.items || []).map((item) => ({
+    title: stripText(item.title).replace(/\s+-\s+[^-]+$/, "").trim(),
+    link: item.link || "",
+    publishedAt: item.pubDate || "",
+    summary: "",
+    source: item.author || label,
+    via: label,
+  })).filter((item) => item.title);
+}
+
+async function gelongQuote(symbol) {
+  const code = gelongCode(symbol);
+  if (!code) return null;
+  const data = await gelongJson(`https://www.gelonghui.com/api/quote/stock?stocks=${code}`);
+  const row = data.result?.[0];
+  if (!row || row.price == null) return null;
+  const percent = Number(row.netChange);
+  return {
+    price: Number(row.price),
+    currency: "HKD",
+    change: Number.isFinite(percent) ? percent / 100 : null,
+  };
+}
+
+function dedupe(items) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const key = item.title.replace(/\s/g, "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+async function tracked(sources, name, job) {
+  try {
+    const items = await job();
+    sources.push({ name, ok: true, count: items.length });
+    return items;
+  } catch (error) {
+    sources.push({ name, ok: false, count: 0, error: error.message || "失败" });
+    return [];
+  }
+}
+
+async function refreshBrief() {
+  const sources = [];
+  const holdings = HOLDINGS.map((holding) => ({ ...holding }));
+  const batches = await Promise.all([
+    tracked(sources, "格隆汇 · 快讯", gelongLive),
+    tracked(sources, "格隆汇 · 股票", () => gelongChannel("stock", "格隆汇股票")),
+    tracked(sources, "格隆汇 · 研报", () => gelongChannel("research", "格隆汇研报")),
+    ...holdings.filter((holding) => holding.name).map((holding) => tracked(sources, `格隆汇 · ${holding.name}`, () => gelongSearch(holding.name))),
+    ...GELONG_POLITICS.map((keyword) => tracked(sources, `格隆汇 · ${keyword}`, () => gelongSearch(keyword))),
+    ...GELONG_CHAIN.map((keyword) => tracked(sources, `格隆汇 · ${keyword}`, () => gelongSearch(keyword))),
+    tracked(sources, "Google News · 持仓", () => googleRss("(罗博特科 OR 3757.HK OR 纳真 OR 9856.HK OR 紫金黄金 OR 2259.HK) when:7d", "Google News")),
+    tracked(sources, "Google News · 政治", () => googleRss('(美联储 OR 中期选举 OR 伊朗 OR 特朗普 OR Trump OR Fed) when:3d', "Google News")),
+    tracked(sources, "Google News · 金融时报与路透", () => googleRss("(site:ft.com OR site:reuters.com) (Fed OR gold OR Trump OR Iran OR election OR oil) when:7d", "Financial Times", "en-US")),
+    tracked(sources, "Google News · 产业链", () => googleRss(CHAIN_QUERY, "Google News")),
+  ]);
+  const headlines = dedupe(batches.flat());
+  const now = Date.now();
+  const dated = headlines
+    .map((item) => ({ ...item, time: Date.parse(item.publishedAt) || 0 }))
+    .filter((item) => item.time === 0 || item.time >= now - 7 * 24 * 3600 * 1000);
+  const fresh = dated.filter((item) => item.time === 0 || item.time >= now - 72 * 3600 * 1000);
+  const windowHours = fresh.length >= 12 ? 72 : 24 * 7;
+  const used = fresh.length >= 12 ? fresh : dated;
+
+  await Promise.all(holdings.map(async (holding) => {
+    try {
+      holding.quote = await gelongQuote(holding.ticker);
+    } catch {
+      holding.quote = null;
+    }
+  }));
+
+  const peerQuotes = {};
+  const board = QUOTE_BOARD.gold || [];
+  peerQuotes.gold = await Promise.all(board.map(async (peer) => {
+    try {
+      return { ...peer, quote: await gelongQuote(peer.symbol) };
+    } catch {
+      return { ...peer, quote: null };
+    }
+  }));
+
+  const stamp = hkStamp();
+  const brief = buildBriefing({
+    holdings,
+    headlines: used,
+    generatedAt: new Date().toISOString(),
+    trigger: "manual",
+    sources,
+    windowHours,
+    model: null,
+    peerQuotes,
+  });
+  return { ...brief, ...stamp };
+}
+
+function paint(brief) {
+  const sheet = document.querySelector("#sheet");
+  if (sheet) sheet.innerHTML = sheetHtml(brief);
+}
+
+async function updateBrief() {
+  const button = document.querySelector("#refresh");
+  const status = document.querySelector("#status");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "正在更新标题和报价…";
+  try {
+    const brief = await refreshBrief();
+    paint(brief);
+    localStorage.setItem(STORE, JSON.stringify(brief));
+    const failed = (brief.sources || []).filter((source) => !source.ok).map((source) => source.name);
+    if (status) status.textContent = failed.length ? `已更新到 ${brief.hkTime}。没读到：${failed.join("、")}。` : `已更新到香港时间 ${brief.hkDate} ${brief.hkTime}。`;
+  } catch (error) {
+    if (status) status.textContent = error.message || "更新失败";
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function mount() {
+  const saved = (() => {
+    try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch { return null; }
+  })();
+  if (saved?.impacts) paint(saved);
+  globalThis.updateBrief = updateBrief;
+}
+
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount);
+  else mount();
+}
+
+  </script>
 </head>
 <body>
   <main>
@@ -52,7 +920,7 @@
         <h1>持仓早报</h1>
       </div>
       <div>
-        <button id="refresh" type="button">立即更新</button>
+        <button id="refresh" type="button" onclick="updateBrief()">立即更新</button>
         <p id="status"></p>
       </div>
     </header>
@@ -197,3 +1065,14 @@
     </header>
     <p>偏多 5。报价 黄金期货 +1.6%，紫金矿业 +4.2%，中国黄金国际 +4.1%。标题里还有港股招金矿业。同类涨跌只作参照。</p>
     <ul class="marks"><li><span>黄金期货 <em>GCmain</em></span><span class="up">4137.0 USD +1.6%</span></li><li><span>紫金矿业 <em>2899.HK</em></span><span class="up">30.60 HKD +4.2%</span></li><li><span>中国黄金国际 <em>2099.HK</em></span><span class="up">186.4 HKD +4.1%</span></li></ul>
+    <ul class="heads"><li><p><a href="https://www.gelonghui.com/p/7292227">400盎司金条电子存证上线，招金矿业(01818.HK)海外抢占新位置</a></p><p class="meta">黄金 · 11月04日 17:33</p></li></ul>
+  </section>
+    </div>
+  </article>
+    <footer>
+      <p>政治栏看美联储、选举、美伊和特朗普。金融栏看利率、金价、资金和公司自身。同业栏看美股、港股和 A 股同类。黄金同业还包括紫金矿业和中国黄金国际的当日涨跌。</p>
+    </footer>
+    </div>
+  </main>
+</body>
+</html>
